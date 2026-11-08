@@ -505,7 +505,7 @@ let base = null;
 function fit(cv) { const d = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight; cv.width = Math.round(w * d); cv.height = Math.round(h * d); const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0); return [g, w, h]; }
 function drawWaveBase() {
   const cv = $('wave'), [g, w, h] = fit(cv), R = S.res;
-  const pl = 104, pr = 12, pt = 26, pb = 30, lanes = [
+  const pl = 104, pr = 12, pt = 48, pb = 30, lanes = [
     { k: 'vg', lab: 'VGS', col: '#c98500', hi: 11, fmt: v => v + ' V' },
     { k: 'id', lab: 'ID', col: '#0e9488', hi: 12, fmt: v => v + ' A' },
     { k: 'vd', lab: 'VDS', col: '#d1307f', hi: 450, fmt: v => v + ' V' }];
@@ -517,10 +517,10 @@ function drawWaveBase() {
   const fr = [0.48, 0.26, 0.26], H = h - pt - pb;           // gate lane is the tallest
   g.clearRect(0, 0, w, h); g.font = '12px IBM Plex Mono, monospace';
   for (let k = 0; k < 4; k++) {
-    g.fillStyle = k === mk ? 'rgba(209,48,127,0.08)' : k % 2 ? 'rgba(20,30,50,0.015)' : 'rgba(20,30,50,0.04)'; g.fillRect(X(k), pt - 20, X(k + 1) - X(k), h - pt - pb + 20);
-    if (k === mk) { g.strokeStyle = 'rgba(209,48,127,0.6)'; g.setLineDash([4, 4]); g.strokeRect(X(k) + 0.5, pt - 20, X(k + 1) - X(k) - 1, h - pt - pb + 20); g.setLineDash([]); }
+    g.fillStyle = k === mk ? 'rgba(209,48,127,0.08)' : k % 2 ? 'rgba(20,30,50,0.015)' : 'rgba(20,30,50,0.04)'; g.fillRect(X(k), pt - 42, X(k + 1) - X(k), h - pt - pb + 42);
+    if (k === mk) { g.strokeStyle = 'rgba(209,48,127,0.6)'; g.setLineDash([4, 4]); g.strokeRect(X(k) + 0.5, pt - 42, X(k + 1) - X(k) - 1, h - pt - pb + 42); g.setLineDash([]); }
     g.fillStyle = k === mk ? '#d1307f' : '#1a1f27'; g.textAlign = 'center'; g.font = (k === mk ? '700 15px' : '600 13px') + ' IBM Plex Sans, sans-serif';
-    g.fillText((k + 1) + '  ' + STAGES[S.mode][k][0].replace(/<[^>]+>/g, ''), (X(k) + X(k + 1)) / 2, pt - 7);
+    g.fillText((k + 1) + '  ' + STAGES[S.mode][k][0].replace(/<[^>]+>/g, ''), (X(k) + X(k + 1)) / 2, pt - 24);
     g.font = '12px IBM Plex Mono, monospace'; g.fillStyle = '#5d6676';
     g.fillText(fmtT(R.b[k + 1] - R.b[k]), (X(k) + X(k + 1)) / 2, h - 10);
   }
