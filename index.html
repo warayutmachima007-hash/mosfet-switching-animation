@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How a MOSFET Switches</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* Single light world for projecting on a white slide. Scope-style channel colours, darkened for contrast. */
+  --bg: #ffffff; --panel: #ffffff; --panel-2: #f1f3f6; --line: #d9dee5;
+  --ink: #1a1f27; --muted: #5d6676; --accent: #1f6fd1;
+  --vg: #c98500; --id: #0e9488; --vd: #d1307f; --dio: #6f56d9; --wire: #3d4654;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+  /* layout: big schematic + stage card on top, stage-scaled waveforms below */
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); }
+body { padding: 18px; }
+h1, h2 { font-family: var(--font-display); margin: 0; text-wrap: balance; }
+h1 { font-size: 26px; }
+.top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 20px; margin-bottom: 14px; }
+.top p { margin: 3px 0 0; color: var(--muted); font-size: 14px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button { font: inherit; font-size: 15px; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 8px 14px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; padding: 8px 18px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed=true] { background: var(--accent); color: #ffffff; font-weight: 600; }
+#play { background: var(--accent); color: #ffffff; font-weight: 600; border-color: var(--accent); min-width: 92px; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); gap: 14px; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+svg { display: block; width: 100%; height: auto; }
+svg text { font-family: var(--font-body); }
+svg [font-family="IBM Plex Mono"], svg g[font-family] text { font-family: var(--font-mono); }
+.stage { display: grid; gap: 14px; align-content: start; }
+.stepper { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.stepper button { padding: 8px 4px; font-size: 13px; line-height: 1.2; text-align: center; }
+.stepper button b { display: block; font-family: var(--font-display); font-size: 18px; }
+.stepper button[aria-current=true] { border-color: var(--accent); background: #e3effc; }
+.stage .num { font-family: var(--font-mono); color: var(--accent); font-size: 14px; }
+.stage h2 { font-size: 28px; margin-top: 2px; }
+.stage p { margin: 0; font-size: 17px; line-height: 1.5; color: #2b3340; }
+.split { display: grid; gap: 6px; }
+.split .lab { font-size: 13px; color: var(--muted); }
+.bar { display: flex; height: 26px; border-radius: 6px; overflow: hidden; background: var(--panel-2); font-family: var(--font-mono); font-size: 13px; }
+.bar div { color: #fff !important; display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; transition: width 0.08s linear; color: #ffffff; font-weight: 600; }
+#barGS { background: var(--vg); } #barGD { background: var(--vd); }
+.vals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.val { background: var(--panel-2); border-radius: 7px; padding: 6px 10px; border-left: 3px solid var(--c); }
+.val small { display: block; color: var(--muted); font-size: 12px; }
+.val span { font-family: var(--font-mono); font-size: 19px; font-variant-numeric: tabular-nums; }
+.wave { margin-top: 14px; }
+.wave canvas { display: block; width: 100%; height: 360px; cursor: ew-resize; touch-action: none; }
+.sources { margin-top: 14px; }
+.sources h2 { font-size: 16px; margin-bottom: 6px; }
+.sources ul { margin: 0; padding-left: 20px; color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+.note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+kbd { font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+@media (prefers-reduced-motion: reduce) { .bar div { color: #fff !important; transition: none; } }
+</style>
+</head>
+<body>
+<div class="top">
+  <div>
+    <h1>How a power MOSFET turns on and off</h1>
+    <p>The MOSFET is a switch hidden behind three parasitic capacitors. Switching speed is the time the driver needs to move charge in and out of them.</p>
+  </div>
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Event">
+      <button id="m-on" data-mode="on">Turn-on</button>
+      <button id="m-off" data-mode="off">Turn-off</button>
+    </div>
+    <button id="prev" aria-label="Previous stage">◂ Back</button>
+    <button id="play">Play</button>
+    <button id="next" aria-label="Next stage">Next ▸</button>
+  </div>
+</div>
+
+<div class="grid">
+  <section class="panel">
+    <svg id="sch" viewBox="0 0 720 440" role="img" aria-label="MOSFET with parasitic capacitances in an inductive load circuit"></svg>
+  </section>
+  <section class="panel stage" aria-live="polite">
+    <div class="stepper" id="stepper"></div>
+    <div>
+      <div class="num" id="stNum"></div>
+      <h2 id="stTitle"></h2>
+    </div>
+    <p id="stText"></p>
+    <div class="split">
+      <div class="lab">Where the gate current goes right now</div>
+      <div class="bar"><div id="barGS">C<sub>GS</sub></div><div id="barGD">C<sub>GD</sub></div></div>
+    </div>
+    <div class="vals">
+      <div class="val" style="--c:var(--vg)"><small>V<sub>GS</sub></small><span id="vVG">–</span></div>
+      <div class="val" style="--c:var(--id)"><small>I<sub>D</sub></small><span id="vID">–</span></div>
+      <div class="val" style="--c:var(--vd)"><small>V<sub>DS</sub></small><span id="vVD">–</span></div>
+    </div>
+  </section>
+</div>
+
+<section class="panel wave">
+  <canvas id="wave" aria-label="Gate voltage, drain current and drain voltage across the four stages"></canvas>
+  <p class="note">Not to time scale: the Miller plateau is drawn wider and the other stages equal, with the real duration printed under each. The V<sub>GS</sub> axis is stretched below 4 V so the threshold and plateau stand out. Example device: 600-V trench MOSFET switching 10 A at 400 V with R<sub>G</sub> = 5 Ω (Baliga, <i>Advanced Power MOSFET Concepts</i>, Sec. 3.10). Keys: <kbd>Space</kbd> play, <kbd>←</kbd> <kbd>→</kbd> stages.</p>
+</section>
+<section class="panel sources">
+  <h2>Sources</h2>
+  <ul>
+    <li>B. J. Baliga, <i>Advanced Power MOSFET Concepts</i>, Springer, 2010 (DOI 10.1007/978-1-4419-5917-1). Device model and example values: Sec. 3.10, "Inductive Load Turn-Off Characteristics" (circuit Fig. 3.43; waveforms Figs. 3.44–3.45; 600-V U-MOSFET: 33 A/cm², 400 V, R<sub>G,sp</sub> = 1.5 Ω·cm², gate plateau Eq. 3.30, C<sub>GD</sub> 41.6 → 0.16 nF/cm²).</li>
+    <li>Gate-charge stages and the Q<sub>GS1</sub>/Q<sub>GS2</sub>/Q<sub>GD</sub> split: Baliga, Sec. 2.6 "Gate Charge" (Figs. 2.25–2.27).</li>
+    <li>Waveforms on this page are computed from that model (square-law channel, constant C<sub>GS</sub>, voltage-dependent C<sub>GD</sub>, ideal diode, no stray inductance). They match the book's analytical turn-off times to within about 10–20%.</li>
+  </ul>
+</section>
+
+<script>
+// MOSFET clamped-inductive-load switching simulator.
+// Device model follows Baliga, Advanced Power MOSFET Concepts (2010):
+//  - square-law saturated channel current  J = K (vG - VTH)^2    (eq. 2.17 / 3.30)
+//  - constant CGS, drain-voltage dependent CGD (deep-depletion MOS + mesa screening)
+//  - ideal free-wheeling diode clamp, constant load current over the transient
+// All "specific" quantities are per cm^2 and are scaled by the active area A.
+
+const EPS0 = 8.854e-14, EOX = 3.9 * EPS0;
+
+function cgdSp(p, v) {
+  // smooth roll-off fitted to the book's CGD,SP values:
+  // Cmin + (C0 - Cmin) / (1 + (v/Vk)^n)   (MOS deep depletion, then mesa / shield screening)
+  v = Math.max(v, 0);
+  return p.cgdMin + (p.cgd0 - p.cgdMin) / (1 + Math.pow(v / p.vk, p.n));
+}
+function cdsSp(p, v) {
+  v = Math.max(v, 0);
+  return p.useCds ? p.cds0 / Math.sqrt(1 + v / 0.7) : 0;
+}
+function vov(p, vg) {               // smooth overdrive (softplus) to avoid a hard kink at VTH
+  const s = 0.04;
+  const x = (vg - p.vth) / s;
+  return x > 30 ? vg - p.vth : s * Math.log1p(Math.exp(x));
+}
+function ich(p, vg, vd) {           // channel current, A
+  const A = p.area;
+  const isat = p.K * Math.pow(vov(p, vg), 2) * A + 1e-12;
+  const ron = p.ronSp / A;
+  const x = Math.max(vd, 0) / (isat * ron);
+  return isat * Math.tanh(x);
+}
+function qgdSp(p, v1, v2) {         // integral of CGD,SP dv (C/cm^2), numeric
+  const N = 400; let q = 0; const h = (v2 - v1) / N;
+  for (let i = 0; i < N; i++) q += cgdSp(p, v1 + (i + 0.5) * h) * h;
+  return q;
+}
+
+// mode: 'on' (RG drive), 'off' (RG drive), 'qg' (constant gate current turn-on)
+function simulate(p, mode) {
+  const A = p.area, IL = p.JL * A, VDD = p.VDD;
+  const Cgs = p.cgs * A;
+  const Cgd = v => cgdSp(p, v) * A, Cds = v => cdsSp(p, v) * A;
+  const RG = p.RG;
+  const vdrv = mode === 'off' ? p.VGoff : p.VGS;
+  const gateI = vg => mode === 'qg' ? (vg < p.VGS ? p.Ig : 0) : (vdrv - vg) / RG;
+
+  // initial state
+  let vg, vd, clamped;
+  if (mode === 'off') {
+    vg = p.VGS;
+    // on-state drop at full gate drive: solve ich(VGS, vd) = IL
+    let lo = 0, hi = VDD;
+    for (let i = 0; i < 80; i++) { const m = (lo + hi) / 2; (ich(p, vg, m) < IL ? lo = m : hi = m); }
+    vd = (lo + hi) / 2; clamped = false;
+  } else { vg = p.VGoff; vd = VDD; clamped = true; }
+
+  // rough time scale for step control
+  const tauG = mode === 'qg' ? (Cgs + Cgd(0)) * p.VGS / p.Ig : RG * (Cgs + Cgd(0));
+  let dt = tauG * 1e-4;
+  const dtMax = tauG * 2e-3;
+  const out = { t: [], vg: [], vd: [], id: [], idio: [], ig: [], qg: [], ich: [] };
+  let t = 0, qg = 0;
+  const pre = 0.04;   // pre-trigger window fraction (filled after)
+  function push(idTerm) {
+    out.t.push(t); out.vg.push(vg); out.vd.push(vd); out.id.push(idTerm);
+    out.idio.push(Math.max(IL - idTerm, 0)); out.ig.push(gateI(vg)); out.qg.push(qg);
+    out.ich.push(ich(p, vg, vd));
+  }
+  push(mode === 'off' ? IL : 0);
+
+  const vgEnd = mode === 'off' ? p.VGoff + 0.01 * (p.VGS - p.VGoff) : p.VGoff + 0.995 * (p.VGS - p.VGoff);
+  let steps = 0, settled = 0;
+  while (steps++ < 60000) {
+    let vgN, vdN, idTerm, ok = true;
+    if (clamped) {
+      // drain held at VDD by the conducting diode: gate is a linear RC (or constant current)
+      const C = Cgs + Cgd(VDD);
+      if (mode === 'qg') vgN = Math.min(vg + gateI(vg) * dt / C, p.VGS);
+      else vgN = vdrv + (vg - vdrv) * Math.exp(-dt / (RG * C));
+      vdN = VDD;
+      idTerm = ich(p, vgN, VDD) - Cgd(VDD) * (vgN - vg) / dt;
+      if (mode !== 'off' && idTerm >= IL) {           // diode turns off -> drain node released
+        clamped = false; dt = Math.max(dt * 0.25, tauG * 1e-6); continue;
+      }
+    } else {
+      // backward-Euler + Newton on the 2-node (gate, drain) system
+      vgN = vg; vdN = vd;
+      for (let it = 0; it < 40; it++) {
+        const F = (a, b) => {
+          const cg = Cgd((b + vd) / 2), cd = Cds((b + vd) / 2);
+          const r1 = Cgs * (a - vg) + cg * ((a - vg) - (b - vd)) - dt * gateI(a);
+          const r2 = cg * ((b - vd) - (a - vg)) + cd * (b - vd) + dt * ich(p, a, b) - dt * IL;
+          return [r1, r2];
+        };
+        const f = F(vgN, vdN);
+        const ha = 1e-6, hb = Math.max(1e-6, 1e-7 * VDD);
+        const fa = F(vgN + ha, vdN), fb = F(vgN, vdN + hb);
+        const j11 = (fa[0] - f[0]) / ha, j21 = (fa[1] - f[1]) / ha;
+        const j12 = (fb[0] - f[0]) / hb, j22 = (fb[1] - f[1]) / hb;
+        const det = j11 * j22 - j12 * j21;
+        if (!isFinite(det) || det === 0) { ok = false; break; }
+        let da = (-f[0] * j22 + f[1] * j12) / det, db = (-j11 * f[1] + j21 * f[0]) / det;
+        da = Math.max(-0.5, Math.min(0.5, da)); db = Math.max(-0.05 * VDD, Math.min(0.05 * VDD, db));
+        vgN += da; vdN += db;
+        if (Math.abs(da) < 1e-7 && Math.abs(db) < 1e-7 * VDD + 1e-9) break;
+        if (it === 39) ok = false;
+      }
+      if (!ok || Math.abs(vdN - vd) > 0.01 * VDD || Math.abs(vgN - vg) > 0.04) {
+        dt *= 0.5; if (dt < tauG * 1e-9) { dt = tauG * 1e-9; } else continue;
+      }
+      if (vdN >= VDD && mode === 'off') {             // diode picks up the current -> clamp
+        vdN = VDD; clamped = true;
+      }
+      vdN = Math.max(vdN, 0);
+      idTerm = IL - (clamped ? 0 : 0);
+      // terminal drain current = channel + displacement currents
+      idTerm = ich(p, vgN, vdN) + Cgd(vdN) * ((vdN - vd) - (vgN - vg)) / dt + Cds(vdN) * (vdN - vd) / dt;
+      idTerm = Math.min(Math.max(idTerm, 0), IL * 1.02);
+    }
+    const igMid = (gateI(vg) + gateI(vgN)) / 2;
+    qg += igMid * dt;
+    const dv = Math.abs(vgN - vg), dd = Math.abs(vdN - vd);
+    vg = vgN; vd = vdN; t += dt;
+    push(idTerm);
+    // step growth
+    if (dv < 0.01 && dd < 0.002 * VDD) dt = Math.min(dt * 1.25, dtMax);
+    // termination
+    const done = mode === 'off' ? (clamped && vg <= vgEnd) : (!clamped && vg >= vgEnd);
+    if (done) { if (++settled > 30) break; }
+  }
+  // extend a short tail and a pre-trigger window
+  const T = t;
+  const n = out.t.length;
+  const preT = T * pre;
+  const res = { t: [], vg: [], vd: [], id: [], idio: [], ig: [], qg: [], ich: [] };
+  for (let k = 0; k < 20; k++) {
+    res.t.push(-preT + preT * k / 20); res.vg.push(out.vg[0]); res.vd.push(out.vd[0]);
+    res.id.push(out.id[0]); res.idio.push(out.idio[0]); res.ig.push(0); res.qg.push(0); res.ich.push(out.ich[0]);
+  }
+  for (let i = 0; i < n; i++) for (const k in res) res[k].push(out[k][i]);
+  res.mode = mode; res.IL = IL; res.VDD = VDD; res.T = T;
+  res.events = findEvents(p, res, mode);
+  res.energy = energy(res);
+  res.vgp = p.vth + Math.sqrt(p.JL / p.K);
+  return res;
+}
+
+function crossT(arr, t, thr, rising, from = 0) {
+  for (let i = Math.max(from, 1); i < arr.length; i++) {
+    const a = arr[i - 1], b = arr[i];
+    if (rising ? (a < thr && b >= thr) : (a > thr && b <= thr)) {
+      const f = (thr - a) / (b - a); return t[i - 1] + f * (t[i] - t[i - 1]);
+    }
+  }
+  return null;
+}
+function findEvents(p, r, mode) {
+  const IL = r.IL, VDD = r.VDD, ev = {};
+  const von = r.vd[r.vd.length - 1], vonStart = r.vd[0];
+  if (mode !== 'off') {
+    ev.t1 = crossT(r.vg, r.t, p.vth, true);                       // VG reaches VTH: current starts
+    ev.t2 = crossT(r.id, r.t, 0.98 * IL, true);                   // current reaches load current
+    ev.t3 = crossT(r.vd, r.t, von + 0.02 * (VDD - von), false);   // drain voltage collapses
+    ev.t4 = crossT(r.vg, r.t, p.VGoff + 0.9 * (p.VGS - p.VGoff), true);
+  } else {
+    const vgp = p.vth + Math.sqrt(p.JL / p.K);
+    ev.t4 = crossT(r.vg, r.t, vgp + 0.03, false);                 // gate reaches plateau (book's t4)
+    ev.t5 = crossT(r.vd, r.t, 0.98 * VDD, true);                  // VD reaches supply
+    ev.t6 = crossT(r.id, r.t, 0.02 * IL, false);                  // current gone
+  }
+  return ev;
+}
+function energy(r) {
+  let e = 0; const pw = [0];
+  for (let i = 1; i < r.t.length; i++) {
+    const p1 = r.id[i - 1] * r.vd[i - 1], p2 = r.id[i] * r.vd[i];
+    e += 0.5 * (p1 + p2) * (r.t[i] - r.t[i - 1]); pw.push(e);
+  }
+  r.ecum = pw;
+  return e;
+}
+
+if (typeof module !== 'undefined') module.exports = { simulate, cgdSp, qgdSp, ich, EOX };
+
+const PRESETS = {
+  d30: { name: '30-V power D-MOSFET', ch: 'Ch. 2 (Figs. 2.25–2.27)', kind: 'planar',
+    vth: 2.7, K: 80/Math.pow(3.54-2.7,2), ronSp: 0.70e-3, cgs: 22.1e-9,
+    cgd0: 2.230e-8, vk: 8.318, n: 2.12, cgdMin: 0, cds0: 15e-9,
+    JL: 80, VDD: 20, VGS: 10, VGoff: 0, RGsp: 2.0, JG: 0.17, area: 0.1, defMode: 'qg',
+    book: { mode: 'qg', QGS1: 67.8, QGS2: 21.1, QGD: 216, QG: 592, VGP: 3.54 } },
+  u600: { name: '600-V power U-MOSFET', ch: 'Sec. 3.10 (Figs. 3.43–3.45)', kind: 'trench',
+    vth: 2.3, K: 33/Math.pow(0.30,2), ronSp: 94e-3, cgs: 61.8e-9,
+    cgd0: 1.2928e-7, vk: 1.995, n: 1.70, cgdMin: 1.44e-10, cds0: 1.5e-9,
+    JL: 33, VDD: 400, VGS: 10, VGoff: 0, RGsp: 1.5, JG: 0.5, area: 0.3, defMode: 'off',
+    book: { mode: 'off', t4: 0.209, tv: 0.167, ti: 0.011, E: 1.17 } },
+  gd600: { name: '600-V power GD-MOSFET', ch: 'Sec. 6.11 (Figs. 6.67–6.68)', kind: 'shield',
+    vth: 1.6, K: 125/Math.pow(0.26,2), ronSp: 6.4e-3, cgs: 26.5e-9,
+    cgd0: 1.50e-9, vk: 26.30, n: 3.30, cgdMin: 9.7e-12, cds0: 4e-9,
+    JL: 125, VDD: 400, VGS: 10, VGoff: 0, RGsp: 3.4, JG: 0.5, area: 0.1, defMode: 'off',
+    book: { mode: 'off', t4: 0.16, tv: 0.088, ti: 0.013, E: 2.52 } },
+};
+if (typeof module !== 'undefined') module.exports = { PRESETS };
+
+
+const STAGES = {
+  on: [
+    ['Charge C<sub>GS</sub>', 'Charging the gate', 'The driver pushes current through R<sub>G</sub> into the gate. V<sub>GS</sub> climbs, but it is still below the threshold V<sub>TH</sub>, so there is no channel. The MOSFET stays off and the diode keeps carrying the load current. This is the turn-on delay.'],
+    ['Current rises', 'Drain current rises', 'V<sub>GS</sub> passes V<sub>TH</sub> and a channel forms. Drain current ramps up and takes the load current away from the diode. V<sub>DS</sub> cannot fall yet: while the diode still conducts, the drain is held at the supply voltage.'],
+    ['Miller plateau', 'Miller plateau: V<sub>DS</sub> falls', 'The MOSFET now carries the full load current and the diode turns off, so the drain voltage can fall. A falling drain pulls charge through C<sub>GD</sub>, and almost all of the gate current goes into C<sub>GD</sub>. V<sub>GS</sub> stays flat at the plateau until V<sub>DS</sub> reaches the on-state level.'],
+    ['Fully on', 'Gate charges to full drive', 'With V<sub>DS</sub> down at the on-state drop, the rest of the gate charge fills C<sub>GS</sub> and the now-large C<sub>GD</sub>. V<sub>GS</sub> rises to the drive voltage, which minimises R<sub>DS(on)</sub>. Nothing changes at the drain any more.'],
+  ],
+  off: [
+    ['Discharge', 'Discharging the gate', 'The driver pulls the gate low through R<sub>G</sub>. V<sub>GS</sub> falls, but until it reaches the plateau the channel can still carry the full load current, so nothing happens at the drain. This is the turn-off delay.'],
+    ['Miller plateau', 'Miller plateau: V<sub>DS</sub> rises', 'The load current has nowhere else to go until the drain rises above the supply and turns the diode on. So V<sub>DS</sub> climbs while I<sub>D</sub> stays at full current, and the gate current now comes almost entirely out of C<sub>GD</sub>. V<sub>GS</sub> stays flat. Most of the turn-off loss is made here.'],
+    ['Current falls', 'Drain current falls', 'The diode is now clamping the drain at the supply. V<sub>GS</sub> drops from the plateau to V<sub>TH</sub>, the channel pinches off and the current moves over to the diode. This is fast, because C<sub>GD</sub> is tiny at high voltage.'],
+    ['Off', 'MOSFET is off', 'The gate keeps discharging to 0 V. The MOSFET blocks the full supply, with C<sub>DS</sub> and C<sub>GD</sub> charged to it, and the diode carries the load current.'],
+  ],
+};
+
+const q = PRESETS.u600;
+const P = { vth: q.vth, K: q.K, ronSp: q.ronSp, cgs: q.cgs, cgd0: q.cgd0, vk: q.vk, n: q.n, cgdMin: q.cgdMin, cds0: q.cds0, useCds: true,
+  JL: q.JL, VDD: q.VDD, VGS: 10, VGoff: 0, area: q.area, RG: 5, Ig: 0.15 };
+const S = { mode: 'on', u: 0, playing: false, stopAt: null, res: null };
+const SEC_PER_STAGE = 4;
+const $ = id => document.getElementById(id);
+
+function prepare() {
+  const r = simulate(P, S.mode), e = r.events;
+  const end = r.t[r.t.length - 1];
+  const b = S.mode === 'on' ? [0, e.t1, e.t2, e.t3, end] : [0, e.t4, e.t5, e.t6, end];
+  // keep only t >= 0 samples
+  const k0 = r.t.findIndex(t => t >= 0);
+  const R = {}; for (const k of ['t', 'vg', 'vd', 'id', 'idio', 'ig', 'ich']) R[k] = r[k].slice(k0);
+  R.IL = r.IL; R.VDD = r.VDD; R.vgp = r.vgp; R.b = b;
+  // split of gate current between CGS and CGD
+  const A = P.area, n = R.t.length; R.fgd = new Float64Array(n); R.uu = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(i - 2, 0), c = Math.min(i + 2, n - 1), dt = R.t[c] - R.t[a];
+    if (dt <= 0) { R.fgd[i] = i ? R.fgd[i - 1] : 0; continue; }
+    const igs = P.cgs * A * (R.vg[c] - R.vg[a]) / dt;
+    const igd = cgdSp(P, R.vd[i]) * A * ((R.vg[c] - R.vg[a]) - (R.vd[c] - R.vd[a])) / dt;
+    const tot = Math.abs(igs) + Math.abs(igd);
+    R.fgd[i] = tot > 0 ? Math.abs(igd) / tot : (i ? R.fgd[i - 1] : 0);
+    R.uu[i] = uOfT(R.t[i], b);
+  }
+  S.res = R;
+}
+function uOfT(t, b) { for (let k = 0; k < 4; k++) if (t <= b[k + 1] || k === 3) return k + Math.min(Math.max((t - b[k]) / (b[k + 1] - b[k]), 0), 1); }
+function tOfU(u) { const b = S.res.b, k = Math.min(Math.floor(u), 3); return b[k] + (u - k) * (b[k + 1] - b[k]); }
+function sample(u) {
+  const R = S.res, t = tOfU(u); let lo = 0, hi = R.t.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; (R.t[m] <= t ? lo = m : hi = m); }
+  const f = R.t[hi] > R.t[lo] ? Math.min(Math.max((t - R.t[lo]) / (R.t[hi] - R.t[lo]), 0), 1) : 0;
+  const L = k => R[k][lo] + f * (R[k][hi] - R[k][lo]);
+  return { t, i: lo, vg: L('vg'), vd: L('vd'), id: L('id'), idio: L('idio'), ig: L('ig'), ich: L('ich'), fgd: L('fgd') };
+}
+function fmtT(s) { const p = x => String(Number(x.toPrecision(2))); return s >= 1e-6 ? p(s * 1e6) + ' µs' : s >= 1e-9 ? p(s * 1e9) + ' ns' : p(s * 1e12) + ' ps'; }
+const fV = v => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1)) + ' V';
+const fA = a => a.toFixed(1) + ' A';
+
+// ---------- schematic ----------
+function buildSchematic() {
+  const W = 'stroke="var(--wire)" stroke-width="2.5" fill="none"';
+  $('sch').innerHTML = `
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--wire)"/></marker></defs>
+  <!-- supply and load -->
+  <g ${W}>
+    <path d="M60 40 H640 M480 40 V64 M480 136 V170 M480 170 H640 V128 M640 92 V40"/>
+    <path d="M60 40 V180 M60 230 V410 H560"/>
+    <path d="M480 170 V214 M480 330 V410"/>
+  </g>
+  <circle cx="60" cy="205" r="24" fill="var(--panel)" stroke="var(--wire)" stroke-width="2.5"/>
+  <text x="60" y="199" text-anchor="middle" fill="var(--ink)" font-size="16">+</text><text x="60" y="219" text-anchor="middle" fill="var(--ink)" font-size="16">−</text>
+  <text x="94" y="210" fill="var(--vd)" font-size="16" font-family="IBM Plex Mono">400 V</text>
+  <path d="M480 64 q16 4.5 0 9 q16 4.5 0 9 q16 4.5 0 9 q16 4.5 0 9 q16 4.5 0 9 q16 4.5 0 9 q16 4.5 0 9 q16 4.5 0 9" stroke="var(--wire)" stroke-width="2.5" fill="none"/>
+  <text x="456" y="96" fill="var(--muted)" font-size="14" text-anchor="end">load</text><text x="456" y="114" fill="var(--ink)" font-size="15" text-anchor="end" font-family="IBM Plex Mono">10 A</text>
+  <path d="M626 128 H654 L640 98 Z" fill="var(--panel)" stroke="var(--wire)" stroke-width="2.5"/><path d="M624 94 H656" stroke="var(--wire)" stroke-width="2.5"/>
+  <text x="664" y="106" fill="var(--muted)" font-size="14">diode</text>
+  <text x="664" y="126" fill="var(--dio)" font-size="15" font-family="IBM Plex Mono" id="tIF">0 A</text>
+
+  <!-- MOSFET symbol -->
+  <g ${W}>
+    <path d="M480 214 H464 M464 330 H480 M464 272 H480"/>
+  </g>
+  <g id="chan" stroke-width="5" stroke-linecap="butt">
+    <path d="M462 204 V230 M462 260 V284 M462 314 V340" stroke="var(--wire)"/>
+  </g>
+  <path d="M470 272 l10 -6 v12 z" fill="var(--wire)" transform="translate(-8 0)"/>
+  <path d="M448 214 V330" stroke="var(--vg)" stroke-width="5" id="gatePlate"/>
+  <path d="M448 272 H300" stroke="var(--wire)" stroke-width="2.5"/>
+  <text x="498" y="262" fill="var(--muted)" font-size="14">MOSFET</text>
+  <text x="498" y="284" fill="var(--id)" font-size="17" font-family="IBM Plex Mono" id="tID">0 A</text>
+  <text x="470" y="200" fill="var(--muted)" font-size="13" text-anchor="end">D</text><text x="492" y="352" fill="var(--muted)" font-size="13">S</text><text x="436" y="262" fill="var(--muted)" font-size="13" text-anchor="end">G</text>
+
+  <!-- gate driver -->
+  <path d="M190 272 l6 -9 l9 18 l9 -18 l9 18 l9 -18 l9 18 l6 -9" stroke="var(--wire)" stroke-width="2.5" fill="none"/>
+  <path d="M160 272 H190 M256 272 H300" stroke="var(--wire)" stroke-width="2.5"/>
+  <text x="223" y="250" text-anchor="middle" fill="var(--muted)" font-size="14">R<tspan font-size="10" dy="3">G</tspan></text>
+  <rect x="84" y="248" width="76" height="48" rx="6" fill="var(--panel-2)" stroke="var(--wire)" stroke-width="2.5"/>
+  <text x="122" y="268" text-anchor="middle" fill="var(--ink)" font-size="14">driver</text>
+  <text x="122" y="287" text-anchor="middle" fill="var(--vg)" font-size="15" font-family="IBM Plex Mono" id="tDrv">0 V</text>
+  <path d="M122 296 V410" stroke="var(--wire)" stroke-width="2.5"/>
+  <text x="300" y="300" fill="var(--vg)" font-size="15" font-family="IBM Plex Mono" id="tIG" text-anchor="middle"></text>
+
+  <!-- parasitic capacitors (dashed = inside the device) -->
+  <g stroke="var(--muted)" stroke-width="2" stroke-dasharray="5 4" fill="none">
+    <path d="M370 272 V200 M370 186 V150 H480"/>
+    <path d="M370 272 V348 M370 362 V390 H480"/>
+    <path d="M480 150 H600 V262 M600 276 V390 H480"/>
+  </g>
+  <g stroke-width="4">
+    <path d="M354 186 H386 M354 200 H386" stroke="var(--vd)"/>
+    <path d="M354 348 H386 M354 362 H386" stroke="var(--vg)"/>
+    <path d="M584 262 H616 M584 276 H616" stroke="var(--dio)"/>
+  </g>
+  <text x="344" y="192" text-anchor="end" fill="var(--vd)" font-size="17" font-weight="600">C<tspan font-size="12" dy="4">GD</tspan></text>
+  <text x="344" y="360" text-anchor="end" fill="var(--vg)" font-size="17" font-weight="600">C<tspan font-size="12" dy="4">GS</tspan></text>
+  <text x="626" y="268" fill="var(--dio)" font-size="17" font-weight="600">C<tspan font-size="12" dy="4">DS</tspan></text>
+  <text x="344" y="214" text-anchor="end" fill="var(--muted)" font-size="13" font-family="IBM Plex Mono" id="tCGD"></text>
+  <text x="344" y="380" text-anchor="end" fill="var(--muted)" font-size="13" font-family="IBM Plex Mono" id="tCGS"></text>
+  <text x="626" y="292" fill="var(--muted)" font-size="13" font-family="IBM Plex Mono" id="tCDS"></text>
+  <g id="qGD" font-family="IBM Plex Mono" font-size="14" font-weight="600"></g>
+  <g id="qGS" font-family="IBM Plex Mono" font-size="14" font-weight="600"></g>
+  <g id="qDS" font-family="IBM Plex Mono" font-size="14" font-weight="600"></g>
+  <text x="370" y="430" text-anchor="middle" fill="var(--muted)" font-size="12">dashed parts are parasitic, built into the MOSFET</text>
+
+  <!-- animated currents -->
+  <g fill="none" stroke-linecap="round" stroke-dasharray="2 12">
+    <path id="fL" d="M480 40 V170" stroke="var(--ink)"/>
+    <path id="fD" d="M480 170 H640 V40 H480" stroke="var(--dio)"/>
+    <path id="fM" d="M480 170 V410 H60 V40 H480" stroke="var(--id)"/>
+    <path id="fG" d="M160 272 H370" stroke="var(--vg)"/>
+    <path id="fGD" d="M370 272 V150 H480" stroke="var(--vd)"/>
+    <path id="fGS" d="M370 272 V390 H480" stroke="var(--vg)"/>
+  </g>
+  <text x="612" y="200" fill="var(--vd)" font-size="15" font-family="IBM Plex Mono" id="tVD"></text>
+  <text x="300" y="262" fill="var(--vg)" font-size="15" font-family="IBM Plex Mono" text-anchor="middle" id="tVG"></text>`;
+}
+// draw +/- charges on a capacitor's two plates; v = voltage of plate A relative to plate B
+function charges(id, xc, yA, yB, v, vmax, colA) {
+  const n = Math.abs(v) < 0.3 ? 0 : Math.min(5, Math.ceil(5 * Math.sqrt(Math.abs(v) / vmax)));
+  const sA = v >= 0 ? '+' : '−', sB = v >= 0 ? '−' : '+';
+  let h = '';
+  const xs = Array.from({ length: n }, (_, k) => xc + 4 + k * 10);
+  xs.forEach(x => { h += `<text x="${x}" y="${yA}" text-anchor="middle" fill="${colA}">${sA}</text><text x="${x}" y="${yB}" text-anchor="middle" fill="${colA}">${sB}</text>`; });
+  $(id).innerHTML = h;
+}
+let flow = 0;
+function setFlow(id, mag, dir) {
+  const el = $(id), m = Math.max(0, Math.min(1, mag));
+  el.setAttribute('stroke-width', (2 + 4 * m).toFixed(1));
+  el.setAttribute('opacity', m < 0.015 ? 0 : (0.3 + 0.7 * m).toFixed(2));
+  el.setAttribute('stroke-dashoffset', (-(dir || 1) * flow).toFixed(1));
+}
+function drawSchematic(s, dt) {
+  flow += dt * 45;
+  const IL = S.res.IL, igMax = P.VGS / P.RG;
+  const igRel = Math.abs(s.ig) / igMax, dir = Math.sign(s.ig) || 1;
+  setFlow('fL', 1, 1); setFlow('fD', s.idio / IL, 1); setFlow('fM', s.id / IL, 1);
+  setFlow('fG', igRel, dir);
+  setFlow('fGD', igRel * s.fgd, dir); setFlow('fGS', igRel * (1 - s.fgd), dir);
+  const on = Math.max(0, Math.min(1, (s.vg - P.vth) / (S.res.vgp - P.vth)));
+  $('chan').querySelector('path').setAttribute('stroke', on > 0 ? `color-mix(in srgb, #1f9d55 ${Math.round(on * 100)}%, var(--wire))` : 'var(--wire)');
+  $('gatePlate').setAttribute('opacity', (0.35 + 0.65 * s.vg / P.VGS).toFixed(2));
+  // capacitor voltages
+  const vgd = s.vd - s.vg;
+  // CDS charges drawn to the left of the plates
+  const nds = s.vd < 0.3 ? 0 : Math.min(5, Math.ceil(5 * Math.sqrt(s.vd / P.VDD))); let h = '';
+  for (let k = 0; k < nds; k++) { const x = 600 + (k - (nds - 1) / 2) * 10; h += `<text x="${x}" y="258" text-anchor="middle" fill="var(--dio)">+</text><text x="${x}" y="290" text-anchor="middle" fill="var(--dio)">−</text>`; }
+  $('qDS').innerHTML = h;
+  // fix GD charges: drain plate is the top plate at y=186
+  charges('qGD', 400, 183, 212, vgd, P.VDD, 'var(--vd)');
+  charges('qGS', 400, 345, 377, s.vg, P.VGS, 'var(--vg)');
+  $('tCGD').textContent = fV(vgd); $('tCGS').textContent = fV(s.vg); $('tCDS').textContent = fV(s.vd);
+  $('tID').textContent = fA(s.id); $('tIF').textContent = fA(s.idio);
+  $('tVD').textContent = 'VDS ' + fV(s.vd); $('tVG').textContent = 'VGS ' + fV(s.vg);
+  $('tIG').textContent = 'IG ' + (s.ig * 1000).toFixed(0) + ' mA';
+  $('tDrv').textContent = (S.mode === 'on' ? P.VGS : P.VGoff).toFixed(0) + ' V';
+}
+
+// ---------- waveforms ----------
+let base = null;
+function fit(cv) { const d = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight; cv.width = Math.round(w * d); cv.height = Math.round(h * d); const g = cv.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0); return [g, w, h]; }
+function drawWaveBase() {
+  const cv = $('wave'), [g, w, h] = fit(cv), R = S.res;
+  const pl = 104, pr = 12, pt = 26, pb = 30, lanes = [
+    { k: 'vg', lab: 'VGS', col: '#c98500', hi: 11, fmt: v => v + ' V' },
+    { k: 'id', lab: 'ID', col: '#0e9488', hi: 12, fmt: v => v + ' A' },
+    { k: 'vd', lab: 'VDS', col: '#d1307f', hi: 450, fmt: v => v + ' V' }];
+  const mk = S.mode === 'on' ? 2 : 1;                       // Miller stage index
+  const wts = [1, 1, 1, 1]; wts[mk] = 1.7;                  // give the plateau more room
+  const cum = [0]; wts.forEach(v => cum.push(cum[cum.length - 1] + v));
+  const X = u => { const k = Math.min(Math.floor(u), 3); return pl + (cum[k] + (u - k) * wts[k]) / cum[4] * (w - pl - pr); };
+  const UofX = x => { const f = (x - pl) / (w - pl - pr) * cum[4]; for (let k = 0; k < 4; k++) if (f <= cum[k + 1] || k === 3) return k + Math.min(Math.max((f - cum[k]) / wts[k], 0), 0.9999); };
+  const fr = [0.48, 0.26, 0.26], H = h - pt - pb;           // gate lane is the tallest
+  g.clearRect(0, 0, w, h); g.font = '12px IBM Plex Mono, monospace';
+  for (let k = 0; k < 4; k++) {
+    g.fillStyle = k === mk ? 'rgba(209,48,127,0.08)' : k % 2 ? 'rgba(20,30,50,0.015)' : 'rgba(20,30,50,0.04)'; g.fillRect(X(k), pt - 20, X(k + 1) - X(k), h - pt - pb + 20);
+    if (k === mk) { g.strokeStyle = 'rgba(209,48,127,0.6)'; g.setLineDash([4, 4]); g.strokeRect(X(k) + 0.5, pt - 20, X(k + 1) - X(k) - 1, h - pt - pb + 20); g.setLineDash([]); }
+    g.fillStyle = k === mk ? '#d1307f' : '#1a1f27'; g.textAlign = 'center'; g.font = (k === mk ? '700 15px' : '600 13px') + ' IBM Plex Sans, sans-serif';
+    g.fillText((k + 1) + '  ' + STAGES[S.mode][k][0].replace(/<[^>]+>/g, ''), (X(k) + X(k + 1)) / 2, pt - 7);
+    g.font = '12px IBM Plex Mono, monospace'; g.fillStyle = '#5d6676';
+    g.fillText(fmtT(R.b[k + 1] - R.b[k]), (X(k) + X(k + 1)) / 2, h - 10);
+  }
+  lanes.forEach((ln, j) => {
+    const y0 = pt + fr.slice(0, j).reduce((a, b) => a + b, 0) * H + 6, y1 = y0 + fr[j] * H - 12; ln.Y = v => y1 - Math.max(0, Math.min(v, ln.hi)) / ln.hi * (y1 - y0); ln.y0 = y0;
+    if (ln.k === 'vg') {   // stretch 0–4 V (threshold and plateau) over 70% of the lane, compress the rest
+      const brk = 4, fb = 0.7;
+      ln.Y = v => { v = Math.max(0, Math.min(v, ln.hi)); const f = v <= brk ? v / brk * fb : fb + (v - brk) / (ln.hi - brk) * (1 - fb); return y1 - f * (y1 - y0); };
+      g.fillStyle = '#5d6676'; g.font = '11px IBM Plex Mono, monospace'; g.textAlign = 'right';
+      [[0, '0 V'], [10, '10 V']].forEach(([v, t]) => g.fillText(t, pl - 6, ln.Y(v) + 4));
+      g.strokeStyle = 'rgba(20,30,50,0.08)'; g.beginPath(); g.moveTo(pl, ln.Y(brk)); g.lineTo(w - pr, ln.Y(brk)); g.stroke();
+      g.fillText('≈', pl - 6, ln.Y(brk) + 4);
+    }
+    g.fillStyle = ln.col; g.textAlign = 'left'; g.font = '600 14px IBM Plex Sans Condensed, sans-serif'; g.fillText(ln.lab, 8, ln.k === 'vg' ? y0 + 16 : (y0 + y1) / 2 + 5);
+    g.strokeStyle = '#d9dee5'; g.beginPath(); g.moveTo(pl, ln.Y(0) + 0.5); g.lineTo(w - pr, ln.Y(0) + 0.5); g.stroke();
+  });
+  // threshold and plateau guides
+  const lg = lanes[0];
+  [[P.vth, 'VTH'], [R.vgp, 'plateau']].forEach(([v, t], i) => { g.strokeStyle = i ? 'rgba(201,133,0,0.3)' : 'rgba(31,157,85,0.8)'; g.setLineDash(i ? [3, 4] : [6, 4]); g.beginPath(); g.moveTo(pl, lg.Y(v)); g.lineTo(w - pr, lg.Y(v)); g.stroke(); g.setLineDash([]);
+    g.fillStyle = 'rgba(170,110,0,0.95)'; g.font = '11px IBM Plex Mono, monospace';
+    if (i) { g.textAlign = 'right'; g.fillText('plateau ' + v.toFixed(1) + ' V', pl - 6, lg.Y(v) - 2); }
+    else { g.fillStyle = '#1f9d55'; g.font = '600 12px IBM Plex Mono, monospace'; g.textAlign = 'right'; g.fillText('VTH ' + v.toFixed(1) + ' V', pl - 6, lg.Y(v) + 13); } });
+  // where VGS crosses VTH: the channel switches on (turn-on) or off (turn-off)
+  const kx = S.mode === 'on' ? 1 : 3, xt = X(kx), yt = lg.Y(P.vth);
+  g.strokeStyle = '#1f9d55'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(xt, yt); g.lineTo(xt, h - pb); g.stroke();
+  g.fillStyle = '#1f9d55'; g.beginPath(); g.arc(xt, yt, 6, 0, 7); g.fill();
+  g.font = '600 13px IBM Plex Sans, sans-serif'; g.textAlign = 'left';
+  const tx = xt + 10;
+  g.fillText(S.mode === 'on' ? 'VGS reaches VTH:' : 'VGS falls to VTH:', tx, yt + 24);
+  g.font = '12px IBM Plex Sans, sans-serif'; g.fillText(S.mode === 'on' ? 'channel forms, current starts' : 'channel closes, current is gone', tx, yt + 40);
+  // Miller plateau call-out on the gate lane
+  const xa = X(mk + 0.04), xb = X(mk + 0.96), yp = lg.Y(R.vgp);
+  g.save(); g.strokeStyle = 'rgba(201,133,0,0.3)'; g.lineWidth = 14; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(xa, yp); g.lineTo(xb, yp); g.stroke(); g.restore();
+  g.strokeStyle = '#d1307f'; g.fillStyle = '#d1307f'; g.lineWidth = 1.5;
+  const ya = yp - 34; g.beginPath(); g.moveTo(xa, ya); g.lineTo(xb, ya); g.stroke();
+  [[xa, 1], [xb, -1]].forEach(([x, d]) => { g.beginPath(); g.moveTo(x, ya); g.lineTo(x + 8 * d, ya - 5); g.lineTo(x + 8 * d, ya + 5); g.closePath(); g.fill(); });
+  g.textAlign = 'center'; g.font = '700 15px IBM Plex Sans, sans-serif';
+  g.fillText('VGS flat at ' + R.vgp.toFixed(1) + ' V', (xa + xb) / 2, ya - 26);
+  g.font = '13px IBM Plex Sans, sans-serif'; g.fillText('all gate current goes into CGD', (xa + xb) / 2, ya - 9);
+  base = { g, w, h, X, UofX, lanes, img: g.getImageData(0, 0, cv.width, cv.height), pl, pr };
+}
+function trace(ln, key, col, alpha, upto) {
+  const { g, X } = base, R = S.res; g.save(); g.strokeStyle = col; g.globalAlpha = alpha; g.lineWidth = 2.2; g.beginPath();
+  for (let i = 0; i <= upto; i++) { const x = X(R.uu[i]), y = ln.Y(R[key][i]); i ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke(); g.restore();
+}
+function drawWave(s) {
+  const { g, h, X, lanes } = base; g.putImageData(base.img, 0, 0);
+  const n = S.res.t.length - 1;
+  lanes.forEach(ln => { trace(ln, ln.k, ln.col, 0.22, n); if (ln.k === 'id') { trace(ln, 'idio', '#6f56d9', 0.15, n); trace(ln, 'idio', '#6f56d9', 0.85, s.i); } trace(ln, ln.k, ln.col, 1, s.i); });
+  const x = X(S.u); g.strokeStyle = '#1f6fd1'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, 6); g.lineTo(x, h - 26); g.stroke();
+  lanes.forEach(ln => { g.fillStyle = ln.col; g.beginPath(); g.arc(x, ln.Y(s[ln.k]), 4.5, 0, 7); g.fill(); });
+  g.fillStyle = '#6f56d9'; g.font = '11px IBM Plex Mono, monospace'; g.textAlign = 'left'; g.fillText('diode', X(S.mode === 'on' ? 0.05 : 3.4), lanes[1].Y(S.res.IL) - 5);
+}
+
+// ---------- stage UI ----------
+function buildStepper() {
+  $('stepper').innerHTML = STAGES[S.mode].map((s, k) => `<button data-k="${k}"><b>${k + 1}</b>${s[0]}</button>`).join('');
+  $('stepper').querySelectorAll('button').forEach(b => b.onclick = () => playStage(+b.dataset.k));
+}
+let shownStage = -1;
+function updateStage(s) {
+  const k = Math.min(Math.floor(S.u), 3);
+  if (k !== shownStage) {
+    shownStage = k; const st = STAGES[S.mode][k];
+    $('stNum').textContent = (S.mode === 'on' ? 'Turn-on' : 'Turn-off') + ' · stage ' + (k + 1) + ' of 4 · lasts ' + fmtT(S.res.b[k + 1] - S.res.b[k]);
+    $('stTitle').innerHTML = st[1]; $('stText').innerHTML = st[2];
+    $('stepper').querySelectorAll('button').forEach((b, j) => b.setAttribute('aria-current', j === k));
+  }
+  const gd = Math.round(s.fgd * 100), moving = Math.abs(s.ig) > 0.02 * P.VGS / P.RG;
+  $('barGD').style.width = (moving ? gd : 0) + '%'; $('barGS').style.width = (moving ? 100 - gd : 0) + '%';
+  $('barGD').textContent = gd >= 15 ? 'CGD ' + gd + '%' : ''; $('barGS').textContent = 100 - gd >= 15 ? 'CGS ' + (100 - gd) + '%' : '';
+  $('vVG').textContent = fV(s.vg); $('vID').textContent = fA(s.id); $('vVD').textContent = fV(s.vd);
+}
+function playStage(k) { S.u = k; S.stopAt = k + 1; S.playing = true; $('play').textContent = 'Pause'; }
+function setMode(m) {
+  S.mode = m; document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === m));
+  prepare(); buildStepper(); shownStage = -1; drawWaveBase(); S.u = 0; S.stopAt = null; S.playing = false; $('play').textContent = 'Play'; render(0);
+}
+function render(dt) { const s = sample(Math.min(S.u, 3.9999)); drawSchematic(s, dt); drawWave(s); updateStage(s); }
+let last = null;
+function loop(ts) {
+  const dt = last == null ? 0 : Math.min((ts - last) / 1000, 0.1); last = ts;
+  if (S.playing) {
+    S.u += dt / SEC_PER_STAGE;
+    const lim = S.stopAt ?? 4;
+    if (S.u >= lim) { S.u = lim - 1e-4; S.playing = false; S.stopAt = null; $('play').textContent = S.u >= 3.99 ? 'Replay' : 'Play'; }
+  }
+  render(S.playing ? dt : 0);
+  requestAnimationFrame(loop);
+}
+document.querySelectorAll('.seg button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+$('play').onclick = () => {
+  if (S.playing) { S.playing = false; $('play').textContent = 'Play'; return; }
+  if (S.u >= 3.99) S.u = 0; S.stopAt = null; S.playing = true; $('play').textContent = 'Pause';
+};
+$('next').onclick = () => { const k = Math.floor(S.u); playStage(Math.min(!S.playing && S.u % 1 < 0.01 ? k : k + 1, 3)); };
+$('prev').onclick = () => playStage(Math.max(Math.floor(S.u) - 1, 0));
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === ' ') { e.preventDefault(); $('play').click(); }
+  if (e.key === 'ArrowRight') $('next').click();
+  if (e.key === 'ArrowLeft') $('prev').click();
+});
+(function scrub() {
+  const cv = $('wave'); let d = false;
+  const at = ev => { const r = cv.getBoundingClientRect(); S.u = base.UofX(ev.clientX - r.left); };
+  cv.addEventListener('pointerdown', e => { d = true; cv.setPointerCapture(e.pointerId); S.playing = false; $('play').textContent = 'Play'; at(e); });
+  cv.addEventListener('pointermove', e => d && at(e)); cv.addEventListener('pointerup', () => d = false);
+})();
+buildSchematic(); setMode('on');
+addEventListener('resize', () => { drawWaveBase(); render(0); });
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
